@@ -62,12 +62,14 @@ def load_codex_settings():
     auth = load_json(auth_path, "Codex auth.json")
 
     model_providers = config.get("model_providers") or {}
+    active_provider_name = config.get("model_provider")
+    active_provider = model_providers.get(active_provider_name) or {}
     openai_provider = model_providers.get("OpenAI") or {}
-    base_url = openai_provider.get("base_url")
+    base_url = active_provider.get("base_url") or openai_provider.get("base_url")
     token = auth.get("OPENAI_API_KEY")
 
     if not base_url:
-        raise RuntimeError("config.toml 中缺少 model_providers.OpenAI.base_url")
+        raise RuntimeError("config.toml 中当前 model_provider 缺少 base_url")
     if not token:
         raise RuntimeError("auth.json 中缺少 OPENAI_API_KEY")
 
@@ -111,9 +113,10 @@ def load_runtime_settings():
 
 def build_api_url(caller: str, base_url: str, mode: str):
     endpoint = "/images/generations" if mode == "generate" else "/images/edits"
-    if caller == "claude":
-        return f"{base_url}/v1{endpoint}"
-    return f"{base_url}{endpoint}"
+    normalized_base_url = base_url.rstrip("/")
+    if normalized_base_url.endswith("/v1"):
+        return f"{normalized_base_url}{endpoint}"
+    return f"{normalized_base_url}/v1{endpoint}"
 
 
 def guess_mime(path: Path):
