@@ -1,0 +1,255 @@
+---
+name: gen-images
+description: This skill should be used when the user asks to "使用 gpt-image-2", "生成图片", "文生图", "修改图片", "编辑图片", "改图", wants to create or edit images through CLIProxyAPI, or invokes `/gen-images` to run image generation or image editing.
+argument-hint: <自然语言需求>
+allowed-tools: [Bash, Read]
+---
+
+# gen-images
+
+使用这个 skill 处理通过 CLIProxyAPI 调用 `gpt-image-2` 的图片生成和图片编辑任务。支持自动触发，也支持用户手动输入 `/gen-images ...`。
+
+## 目标
+
+- 识别用户是要文生图还是改图
+- 从用户自然语言中提取可用字段
+- 缺少关键字段时先追问用户，不要盲目执行
+- 字段足够时调用 `scripts/gen_images.py`
+- 完成后向用户输出图片路径和实际使用的关键参数
+
+## 资源
+
+- `references/fields.md`：字段、默认值、自然语言映射、交互规则
+- `scripts/gen_images.py`：真正执行图片接口调用和文件保存
+
+## 手动命令用法
+
+用户手动调用时，参数就是自然语言需求：
+
+```text
+/gen-images 生成一张透明背景的猫咪头像，1024x1024，png
+/gen-images 把 ./input.png 改成水彩风，保留主体，输出 webp
+```
+
+命令参数内容在本次执行中就是：
+
+`$ARGUMENTS`
+
+如果是通过自动触发进入本 skill，则直接根据用户原始消息理解需求。
+
+## 任务分类
+
+先判断任务类型：
+
+### 文生图
+出现这类意图时，按文生图处理：
+- `生成图片`
+- `文生图`
+- `画一张图`
+- `用 gpt-image-2 生成`
+
+### 改图
+出现这类意图时，按改图处理：
+- `修改图片`
+- `编辑图片`
+- `改图`
+- `把这张图改成...`
+
+如果同时出现图片来源（本地路径、URL、data URL）和修改意图，优先按改图处理。
+
+## 字段提取规则
+
+先参考 `references/fields.md` 的规则提取字段。
+
+### 必填字段
+
+#### 文生图
+- `prompt`
+
+如果缺少 `prompt`，先向用户追问：
+
+`请补充图片提示词，例如你想生成什么画面。`
+
+#### 改图
+- `prompt`
+- 图片来源
+
+图片来源支持：
+- 本地路径
+- URL
+- data URL
+
+如果缺少图片来源，先向用户追问：
+
+`请提供要编辑的图片来源：1）本地路径 2）图片 URL / data URL`
+
+如果缺少修改要求，先向用户追问：
+
+`请补充修改要求，例如你想把图片改成什么效果。`
+
+### 可选字段
+
+如果用户自然语言中包含以下信息，尽量提取并传给脚本：
+- `size`
+- `quality`
+- `background`
+- `output_format`
+- `n`
+- `moderation`
+- `output_compression`
+- `partial_images`
+- `input_fidelity`（改图）
+
+如果用户没有提供，不要为了可选字段反复追问，直接用默认值。
+
+### 自然语言映射
+
+优先识别这些自然语言：
+- `高清` -> `quality=high`
+- `透明背景` -> `background=transparent`
+- `1024x1024`、`1:1` -> `size=1024x1024`
+- `1024x1536`、`3:4` -> `size=1024x1536`
+- `1536x1024`、`4:3` -> `size=1536x1024`
+- `2048x2048` -> `size=2048x2048`
+- `3840x2160`、`16:9` -> `size=3840x2160`
+- `2160x3840`、`9:16` -> `size=2160x3840`
+- `4k横向`、`16:9` -> `size=3840x2160`
+- `4k竖向`、`9:16` -> `size=2160x3840`
+- `auto` -> `size=auto`
+- `png/jpg/jpeg/webp` -> `output_format=...`
+- `生成3张` -> `n=3`
+
+如果用户明确要求保存格式，按用户要求保存；否则默认保存为 `png`。
+
+## 执行步骤
+
+### 1. 整理参数
+
+从用户消息或 `$ARGUMENTS` 中整理出：
+- `mode`: `generate` 或 `edit`
+- `prompt`
+- `image`（改图时）
+- `mask`（如果用户明确提供）
+- 其他可选字段
+
+### 2. 缺字段就停下来问
+
+缺少必填字段时，不要调用脚本。
+
+### 3. 调用脚本
+
+使用 Bash 调用 Python 脚本。脚本路径应通过 skill 所在目录推导，不要写死绝对路径。
+
+优先使用 `py` 启动器；如果当前环境没有 `py`，再尝试 `python`。
+
+推荐调用方式：
+
+```bash
+py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..."
+```
+
+或：
+
+```bash
+py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..."
+```
+
+### 3.1 timeout 计算规则
+
+`timeout` 规则以 `references/fields.md` 为准。
+
+在发起 Bash 工具调用前，先按 `references/fields.md` 中的 `timeout 规则` 计算本次调用的 `timeout`，不要把 timeout 判断交给脚本。
+
+### 3.2 Bash 调用模板
+
+文生图：
+- 先按上面的规则算出 `timeout`
+- 然后调用 Bash，工具调用的 `timeout` 参数必须使用刚算出的值
+
+示例：
+
+```bash
+py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "1024x1024"
+```
+
+对应工具调用要求：
+- `size=1024x1024` -> `timeout=600000`
+
+```bash
+py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "3840x2160"
+```
+
+对应工具调用要求：
+- `size=3840x2160` -> `timeout=900000`
+
+改图同理：
+
+```bash
+py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." --size "2160x3840"
+```
+
+对应工具调用要求：
+- `size=2160x3840` -> `timeout=900000`
+
+根据已提取到的字段，继续附加参数：
+- `--size`
+- `--quality`
+- `--background`
+- `--output-format`
+- `--n`
+- `--moderation`
+- `--output-compression`
+- `--partial-images`
+- `--input-fidelity`
+- `--mask`
+
+## 脚本行为
+
+`scripts/gen_images.py` 会：
+- 先基于 `scripts/gen_images.py` 自身所在目录向上逐级检查祖先目录名是否为 `.codex` 或 `.claude`，据此判断当前调用者
+- 找到 `.codex/` 时按 Codex 调用处理，读取 `~/.codex/config.toml` 中的 `model_providers.OpenAI.base_url`
+- 找到 `.claude/` 时按 Claude 调用处理，读取 `~/.claude/settings.json` 中的 `env.ANTHROPIC_BASE_URL` 与 `env.ANTHROPIC_AUTH_TOKEN`
+- Codex 调用时再读取 `~/.codex/auth.json` 中的 `OPENAI_API_KEY`
+- 如果无法判定当前调用者，则按回退顺序先尝试 Claude 配置，再尝试 Codex 配置
+- 使用 `Authorization: Bearer <token>` 调用接口
+- Claude 调用时，文生图走 `/v1/images/generations`，改图走 `/v1/images/edits`
+- Codex 调用时，文生图直接走 `/images/generations`，改图直接走 `/images/edits`
+- 将返回图片保存到当前工作目录下的 `./gen-images/`
+- 输出 JSON 结果
+
+## 结果处理
+
+脚本成功时会输出 JSON，例如：
+
+```json
+{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1024x1024", "quality": "high", "output_format": "png", "n": 1}}
+```
+
+脚本失败时会输出 JSON，例如：
+
+```json
+{"ok": false, "error": "缺少 prompt"}
+```
+
+### 成功回复格式
+
+向用户输出：
+
+- `图片已生成, 图片路径: <路径>`
+- `实际使用的关键参数: model=..., size=..., quality=..., output_format=..., n=...`
+
+如果生成多张图片，列出所有路径。
+
+### 失败回复格式
+
+向用户输出：
+
+- `生成失败: <简短错误原因>`
+
+## 注意事项
+
+- 不要在缺少必填字段时猜测用户意图
+- 不要为可选字段做冗长说明
+- 改图时，本地路径、URL、data URL 都要支持
+- 除非用户明确要求，不要增加接口里没有的自定义字段
+- 调用完成后，优先返回结果，不要输出多余解释
