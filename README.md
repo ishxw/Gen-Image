@@ -8,18 +8,12 @@
 - 支持改图 / 编辑图片
 - 支持自动触发
 - 支持手动使用 `/gen-images ...`
-- 自动读取 Claude Code 当前用户配置中的 API Base URL 和 Token
+- 自动读取 Agent 当前用户配置中的 API Base URL 和 Token/KEY
 - 自动将生成结果保存到当前工作目录下的 `./gen-images/`
 
 ## 使用前提
 
-### 1. CLIProxyAPI 版本
-
-要求：
-
-- **CLIProxyAPI >= v6.9.34**
-
-### 2. Python 环境
+### 1. Python 环境
 
 本 skill 通过 Python 脚本执行实际接口请求，因此本机需要可用的 Python 环境。
 
@@ -29,12 +23,15 @@
 py --version
 ```
 
-### 3. Claude Code 配置
+### 2. Agent 配置
 
 本 skill 会从下面的文件中读取当前用户配置：
 
 ```text
 ~/.claude/settings.json
+```
+```text
+~/.codex/settings.json
 ```
 
 需要存在以下字段：
@@ -42,7 +39,10 @@ py --version
 - `env.ANTHROPIC_BASE_URL`
 - `env.ANTHROPIC_AUTH_TOKEN`
 
-### 4. 后端接口支持
+- `env.OPENAI_BASE_URL`
+- `env.OPENAI_API_KEY`
+
+### 3. 后端接口支持
 
 反代链路需要支持：
 
@@ -63,12 +63,14 @@ gen-images/
 
 ## 安装方法
 
-将整个 `gen-images` 目录复制到 Claude Code 的用户级 skills 目录：
+将整个 `gen-images` 目录复制到 Agent 工具的用户级 skills 目录：
 
 ```text
 ~/.claude/skills/
 ```
-
+```text
+~/.codex/skills/
+```
 最终路径应为：
 
 ```text
@@ -83,8 +85,10 @@ Windows 下通常对应：
 ```text
 C:\Users\<用户名>\.claude\skills\gen-images\
 ```
-
-复制后重启 Claude Code，或执行插件 / skill 重载。
+```text
+C:\Users\<用户名>\.codex\skills\gen-images\
+```
+复制后重启 Agent，或执行插件 / skill 重载。
 
 ## 使用方式
 
@@ -153,7 +157,6 @@ auto
 - `2160x3840`
 - `3840x2160`
 
-在当前 `CLIProxyAPI + gpt-image-2` 链路中已实测可用。
 但这两个值不等同于 OpenAI 官方公开文档中的标准 size 枚举，属于当前链路下的实测兼容尺寸。
 
 ## 常见自然语言映射
@@ -205,9 +208,8 @@ Bash 调用 `scripts/gen_images.py` 时，timeout 按图片尺寸自动设置。
 
 1. 本 skill 依赖 Python 环境
 2. 本 skill 默认从 `~/.claude/settings.json` 读取 API 配置
-3. 使用前请确认 `CLIProxyAPI >= v6.9.34`
-4. `2160x3840` / `3840x2160` 为当前链路实测可用，不保证所有后端一致支持
-5. 如果复杂长提示词在超大尺寸下偶发失败，建议先做最小提示词对照测试
+3. `2160x3840` / `3840x2160` 为当前链路实测可用，不保证所有后端一致支持
+4. 如果复杂长提示词在超大尺寸下偶发失败，建议先做最小提示词对照测试
 
 ## 相关文件
 
