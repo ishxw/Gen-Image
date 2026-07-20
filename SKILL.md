@@ -1,13 +1,11 @@
 ---
 name: gen-images
-description: This skill should be used when the user asks to "使用 gpt-image-2", "生成图片", "文生图", "修改图片", "编辑图片", "改图", wants to create or edit images through CLIProxyAPI, or invokes `/gen-images` to run image generation or image editing.
-argument-hint: <自然语言需求>
-allowed-tools: [Bash, Read]
+description: Generate or edit images with gpt-image-2 and save the resulting files. Use when the user asks to "使用 gpt-image-2", "生成图片", "文生图", "修改图片", "编辑图片", "改图", or explicitly invokes `$gen-images`.
 ---
 
 # gen-images
 
-使用这个 skill 处理通过 CLIProxyAPI 调用 `gpt-image-2` 的图片生成和图片编辑任务。支持自动触发，也支持用户手动输入 `/gen-images ...`。
+使用这个 skill 处理通过调用 `gpt-image-2` 的图片生成和图片编辑任务。支持自动触发，也支持用户显式输入 `$gen-images ...`。
 
 ## 目标
 
@@ -22,18 +20,14 @@ allowed-tools: [Bash, Read]
 - `references/fields.md`：字段、默认值、自然语言映射、交互规则
 - `scripts/gen_images.py`：真正执行图片接口调用和文件保存
 
-## 手动命令用法
+## 显式调用
 
-用户手动调用时，参数就是自然语言需求：
+用户显式调用时，直接读取 `$gen-images` 后面的自然语言需求：
 
 ```text
-/gen-images 生成一张透明背景的猫咪头像，1024x1024，png
-/gen-images 把 ./input.png 改成水彩风，保留主体，输出 webp
+$gen-images 生成一张透明背景的猫咪头像，1024x1024，png
+$gen-images 把 ./input.png 改成水彩风，保留主体，输出 webp
 ```
-
-命令参数内容在本次执行中就是：
-
-`$ARGUMENTS`
 
 如果是通过自动触发进入本 skill，则直接根据用户原始消息理解需求。
 
@@ -125,7 +119,7 @@ allowed-tools: [Bash, Read]
 
 ### 1. 整理参数
 
-从用户消息或 `$ARGUMENTS` 中整理出：
+从用户当前消息中整理出：
 - `mode`: `generate` 或 `edit`
 - `prompt`
 - `image`（改图时）
@@ -138,58 +132,29 @@ allowed-tools: [Bash, Read]
 
 ### 3. 调用脚本
 
-使用 Bash 调用 Python 脚本。脚本路径应通过 skill 所在目录推导，不要写死绝对路径。
+使用 Codex 当前提供的 shell 工具调用 Python 脚本。脚本路径应通过 skill 所在目录推导，不要写死绝对路径。
 
-优先使用 `py` 启动器；如果当前环境没有 `py`，再尝试 `python`。
+Windows 优先使用 `py` 启动器；其他系统优先使用 `python3`。启动器不可用时再尝试 `python`。
 
 推荐调用方式：
 
-```bash
+```text
 py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..."
 ```
 
 或：
 
-```bash
+```text
 py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..."
 ```
 
-### 3.1 timeout 计算规则
+### 3.1 等待与超时
 
-`timeout` 规则以 `references/fields.md` 为准。
-
-在发起 Bash 工具调用前，先按 `references/fields.md` 中的 `timeout 规则` 计算本次调用的 `timeout`，不要把 timeout 判断交给脚本。
-
-### 3.2 Bash 调用模板
-
-文生图：
-- 先按上面的规则算出 `timeout`
-- 然后调用 Bash，工具调用的 `timeout` 参数必须使用刚算出的值
-
-示例：
-
-```bash
-py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "1024x1024"
-```
-
-对应工具调用要求：
-- `size=1024x1024` -> `timeout=600000`
-
-```bash
-py "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "3840x2160"
-```
-
-对应工具调用要求：
-- `size=3840x2160` -> `timeout=900000`
-
-改图同理：
-
-```bash
-py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." --size "2160x3840"
-```
-
-对应工具调用要求：
-- `size=2160x3840` -> `timeout=900000`
+- 只启动一次前台命令并等待它结束，不要放到后台运行。
+- 不要轮询、反复询问或重复执行命令来检查是否完成。
+- Python 脚本会同步等待接口返回，图片生成成功或接口失败后立即结束。
+- 图片请求固定在 600 秒（10 分钟）后超时并返回 JSON 错误。
+- Codex shell 工具的外层超时设置为略高于脚本超时，例如 `timeout_ms=610000`，让脚本有时间输出结构化超时结果。
 
 根据已提取到的字段，继续附加参数：
 - `--size`
@@ -207,13 +172,13 @@ py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." 
 
 `scripts/gen_images.py` 会：
 - 先基于 `scripts/gen_images.py` 自身所在目录向上逐级检查祖先目录名是否为 `.codex` 或 `.claude`，据此判断当前调用者
-- 找到 `.codex/` 时按 Codex 调用处理，读取 `~/.codex/config.toml` 中的 `model_providers.OpenAI.base_url`
+- 找到 `.codex/` 时按 Codex 调用处理，优先读取 `~/.codex/config.toml` 中当前 `model_provider` 的 `base_url` 和 `env_key`
 - 找到 `.claude/` 时按 Claude 调用处理，读取 `~/.claude/settings.json` 中的 `env.ANTHROPIC_BASE_URL` 与 `env.ANTHROPIC_AUTH_TOKEN`
-- Codex 调用时再读取 `~/.codex/auth.json` 中的 `OPENAI_API_KEY`
+- Codex 调用时从 provider 指定的环境变量、`OPENAI_API_KEY` 环境变量或 `~/.codex/auth.json` 中读取令牌，并使用 `OPENAI_BASE_URL` 作为备用地址
 - 如果无法判定当前调用者，则按回退顺序先尝试 Claude 配置，再尝试 Codex 配置
 - 使用 `Authorization: Bearer <token>` 调用接口
-- Claude 调用时，文生图走 `/v1/images/generations`，改图走 `/v1/images/edits`
-- Codex 调用时，文生图直接走 `/images/generations`，改图直接走 `/images/edits`
+- 根据 `base_url` 是否已经以 `/v1` 结尾构造图片接口地址，避免重复添加版本路径
+- 单次请求同步等待最多 600 秒，不轮询接口状态
 - 将返回图片保存到当前工作目录下的 `./gen-images/`
 - 输出 JSON 结果
 
@@ -252,4 +217,5 @@ py "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." 
 - 不要为可选字段做冗长说明
 - 改图时，本地路径、URL、data URL 都要支持
 - 除非用户明确要求，不要增加接口里没有的自定义字段
+- 图片生成命令启动后保持等待，不要通过重复询问或轮询检查进度
 - 调用完成后，优先返回结果，不要输出多余解释
